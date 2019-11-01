@@ -1,11 +1,8 @@
 ﻿using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace MDASM2 {
 	public class Program {
@@ -40,7 +37,7 @@ namespace MDASM2 {
 			time.Start();
 
 			// prepare variables
-			string inputdata = /*"derp = 2+(2/2)"*/"";
+			string inputdata = "";
 			int ao = 0;
 
 			// check assembler flags here
