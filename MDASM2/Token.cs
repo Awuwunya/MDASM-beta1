@@ -60,6 +60,8 @@ namespace MDASM2 {
 
 	#region Operators
 	public abstract class TokenOperator : TokenValue {
+		public virtual int Precedence { get; }
+		public virtual string OpStr { get; }
 		public bool IsUnary;
 		public TokenValue Right;
 
@@ -69,6 +71,10 @@ namespace MDASM2 {
 
 		public abstract TokenValue Calculate();
 		public virtual bool IsFull() => Right != null;
+
+		public virtual string GetString() {
+			return OpStr + (Right != null ? Right.ToString() : "<?>");
+		}
 	}
 
 	public abstract class TokenOperatorBinary : TokenOperator {
@@ -79,10 +85,16 @@ namespace MDASM2 {
 		}
 
 		public override bool IsFull() => Right != null && Left != null;
+
+		public override string GetString() {
+			return (Left != null ? Left.ToString() : "<?>") + OpStr + (Right != null ? Right.ToString() : "<?>");
+		}
 	}
 
 	public class TokenOpSet : TokenOperatorBinary {
 		public TokenOpSet() : base() { }
+		public override int Precedence => 1;
+		public override string OpStr => "=";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -93,6 +105,8 @@ namespace MDASM2 {
 	#region Operators Unary
 	public class TokenOpNeg : TokenOperator {
 		public TokenOpNeg() : base() { }
+		public override int Precedence => 2;
+		public override string OpStr => "-";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -101,6 +115,8 @@ namespace MDASM2 {
 
 	public class TokenOpNot : TokenOperator {
 		public TokenOpNot() : base() { }
+		public override int Precedence => 2;
+		public override string OpStr => "~";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -109,6 +125,8 @@ namespace MDASM2 {
 
 	public class TokenOpLogicalNot : TokenOperator {
 		public TokenOpLogicalNot() : base() { }
+		public override int Precedence => 2;
+		public override string OpStr => "!";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -119,6 +137,8 @@ namespace MDASM2 {
 	#region Operators Binary Basic
 	public class TokenOpAdd : TokenOperatorBinary {
 		public TokenOpAdd() : base() { }
+		public override int Precedence => 4;
+		public override string OpStr => "+";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -127,6 +147,8 @@ namespace MDASM2 {
 
 	public class TokenOpSub : TokenOperatorBinary {
 		public TokenOpSub() : base() { }
+		public override int Precedence => 4;
+		public override string OpStr => "-";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -135,6 +157,8 @@ namespace MDASM2 {
 
 	public class TokenOpMultiply : TokenOperatorBinary {
 		public TokenOpMultiply() : base() { }
+		public override int Precedence => 3;
+		public override string OpStr => "*";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -143,6 +167,8 @@ namespace MDASM2 {
 
 	public class TokenOpDivide : TokenOperatorBinary {
 		public TokenOpDivide() : base() { }
+		public override int Precedence => 3;
+		public override string OpStr => "/";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -151,6 +177,8 @@ namespace MDASM2 {
 
 	public class TokenOpModulo : TokenOperatorBinary {
 		public TokenOpModulo() : base() { }
+		public override int Precedence => 3;
+		public override string OpStr => "%";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -161,6 +189,8 @@ namespace MDASM2 {
 	#region Operators Binary Bitwise
 	public class TokenOpAnd : TokenOperatorBinary {
 		public TokenOpAnd() : base() { }
+		public override int Precedence => 8;
+		public override string OpStr => "&";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -169,6 +199,8 @@ namespace MDASM2 {
 
 	public class TokenOpOr : TokenOperatorBinary {
 		public TokenOpOr() : base() { }
+		public override int Precedence => 10;
+		public override string OpStr => "|";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -177,6 +209,8 @@ namespace MDASM2 {
 
 	public class TokenOpXor : TokenOperatorBinary {
 		public TokenOpXor() : base() { }
+		public override int Precedence => 9;
+		public override string OpStr => "^";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -187,6 +221,8 @@ namespace MDASM2 {
 	#region Operators Binary Shift
 	public class TokenOpShiftLeft : TokenOperatorBinary {
 		public TokenOpShiftLeft() : base() { }
+		public override int Precedence => 5;
+		public override string OpStr => "<<";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -195,6 +231,8 @@ namespace MDASM2 {
 
 	public class TokenOpShiftRight : TokenOperatorBinary {
 		public TokenOpShiftRight() : base() { }
+		public override int Precedence => 5;
+		public override string OpStr => ">>";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -203,6 +241,8 @@ namespace MDASM2 {
 
 	public class TokenOpRotateLeft : TokenOperatorBinary {
 		public TokenOpRotateLeft() : base() { }
+		public override int Precedence => 5;
+		public override string OpStr => "<<<";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -211,6 +251,8 @@ namespace MDASM2 {
 
 	public class TokenOpRotateRight : TokenOperatorBinary {
 		public TokenOpRotateRight() : base() { }
+		public override int Precedence => 5;
+		public override string OpStr => ">>>";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -221,6 +263,8 @@ namespace MDASM2 {
 	#region Operators Binary Comparison
 	public class TokenOpEquals : TokenOperatorBinary {
 		public TokenOpEquals() : base() { }
+		public override int Precedence => 7;
+		public override string OpStr => "==";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -229,6 +273,8 @@ namespace MDASM2 {
 
 	public class TokenOpNotEquals : TokenOperatorBinary {
 		public TokenOpNotEquals() : base() { }
+		public override int Precedence => 7;
+		public override string OpStr => "!=";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -237,6 +283,8 @@ namespace MDASM2 {
 
 	public class TokenOpLessThan : TokenOperatorBinary {
 		public TokenOpLessThan() : base() { }
+		public override int Precedence => 6;
+		public override string OpStr => "<";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -245,6 +293,8 @@ namespace MDASM2 {
 
 	public class TokenOpGreaterThan : TokenOperatorBinary {
 		public TokenOpGreaterThan() : base() { }
+		public override int Precedence => 6;
+		public override string OpStr => ">";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -253,6 +303,8 @@ namespace MDASM2 {
 
 	public class TokenOpLessOrEquals : TokenOperatorBinary {
 		public TokenOpLessOrEquals() : base() { }
+		public override int Precedence => 6;
+		public override string OpStr => "<=";
 
 		public override TokenValue Calculate() {
 			return null;
@@ -261,6 +313,40 @@ namespace MDASM2 {
 
 	public class TokenOpGreaterOrEquals : TokenOperatorBinary {
 		public TokenOpGreaterOrEquals() : base() { }
+		public override int Precedence => 6;
+		public override string OpStr => ">=";
+
+		public override TokenValue Calculate() {
+			return null;
+		}
+	}
+	#endregion
+
+	#region Operators Misc
+	public class TokenOpArray : TokenOperatorBinary {
+		public TokenOpArray() : base() { }
+		public override int Precedence => 1;
+		public override string OpStr => "[]";
+
+		public override TokenValue Calculate() {
+			return null;
+		}
+	}
+
+	public class TokenOpCast : TokenOperatorBinary {
+		public TokenOpCast() : base() { }
+		public override int Precedence => 100;
+		public override string OpStr => "::";
+
+		public override TokenValue Calculate() {
+			return null;
+		}
+	}
+
+	public class TokenOpField : TokenOperatorBinary {
+		public TokenOpField() : base() { }
+		public override int Precedence => 101;
+		public override string OpStr => ".";
 
 		public override TokenValue Calculate() {
 			return null;

@@ -88,7 +88,7 @@ namespace MDASM2 {
 		}
 
 		public static dynamic StringToNum(string str) {
-			return str;
+			return new TokenValue(TokenValueType.Float, str);
 		}
 		#endregion
 	}

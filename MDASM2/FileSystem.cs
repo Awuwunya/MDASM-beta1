@@ -109,14 +109,14 @@ namespace MDASM2 {
 				textbuf[tpos++] = '\0';
 
 				// delay until we can overwrite data
-				ProcToken(data, ref textbuf, tpos, line);
+				data.Tokens.AddRange(ProcToken(data, ref textbuf, tpos, line));
 			}
 		}
 
-		private static void ProcToken(FileData data, ref char[] buf, int tpos, int line) {
+		private static Token[] ProcToken(FileData data, ref char[] buf, int tpos, int line) {
 			/****************************************
 			// --------------- step 1 ---------------
-			// gparse text
+			// parse text into tokens
 			*****************************************/
 
 			TokenInfo[] infos = new TokenInfo[64];
@@ -388,12 +388,14 @@ namespace MDASM2 {
 			// generate more proper tokens
 			*****************************************/
 
-			TokenGroup[] groups = new TokenGroup[32];
-			int igp = 0;
+			TokenGroup parent = new TokenGroup(TokenNormalEnum.None, -1, null);
 
 			{
 				// convert tokens from text into proper format
-				int istart = 0, depth = 0, i = 0;
+				Stack<TokenGroup> curs = new Stack<TokenGroup>();
+				curs.Push(parent);
+
+				int depth = 0, i = 0, maxdep = 0;
 				Stack<int> macrodep = new Stack<int>();
 				Stack<int> squdep = new Stack<int>();
 
@@ -406,32 +408,34 @@ namespace MDASM2 {
 						goto begin;
 
 					case TokenInfoEnum.LabelOperator: case TokenInfoEnum.LabelOperatorMaybe:
-						GroupExpand(igp, ref groups);
-						groups[igp++] = new TokenGroup(TokenGroupEnum.Label, depth, null);
+						curs.Peek().AddChild(new TokenGroup(TokenNormalEnum.Label, depth, null));
 						i++;
 						goto begin;
 
 					case TokenInfoEnum.CastOperator:
-						GroupExpand(igp, ref groups);
-						groups[igp++] = new TokenGroup(TokenGroupEnum.Cast, depth, null);
+						curs.Peek().AddChild(new TokenGroup(TokenNormalEnum.Operator, depth, new TokenOpCast()));
 						i++;
 						goto begin;
 
 					case TokenInfoEnum.BlockStart:
-						GroupExpand(igp, ref groups);
-						groups[igp++] = new TokenGroup(TokenGroupEnum.BlockStart, depth, null);
+						curs.Peek().AddChild(new TokenGroup(TokenNormalEnum.BlockStart, depth, null));
 						i++;
 						goto begin;
 
 					case TokenInfoEnum.BlockEnd:
-						GroupExpand(igp, ref groups);
-						groups[igp++] = new TokenGroup(TokenGroupEnum.BlockEnd, depth, null);
+						curs.Peek().AddChild(new TokenGroup(TokenNormalEnum.BlockEnd, depth, null));
 						i++;
 						goto begin;
 
-					case TokenInfoEnum.OpenParen:
-						i++; depth++;
-						goto begin;
+					case TokenInfoEnum.OpenParen: {
+						i++;
+						if(++depth > maxdep) maxdep = depth;
+
+						TokenGroup g = new TokenGroup(TokenNormalEnum.None, depth, null);
+						curs.Peek().AddChild(g);
+						curs.Push(g);
+					}
+					goto begin;
 
 					case TokenInfoEnum.CloseParen:
 						i++;
@@ -442,24 +446,25 @@ namespace MDASM2 {
 
 						if(macrodep.Count > 0 && macrodep.Peek() == depth) {
 							macrodep.Pop();
-							GroupExpand(igp, ref groups);
-							groups[igp++] = new TokenGroup(TokenGroupEnum.MacroEnd, depth, null);
+							curs.Pop();
 						}
 						goto begin;
 
-					case TokenInfoEnum.OpenSqu:
-						GroupExpand(igp, ref groups);
-						groups[igp++] = new TokenGroup(TokenGroupEnum.ArrayStart, depth, null);
+					case TokenInfoEnum.OpenSqu: {
+						TokenGroup g = new TokenGroup(TokenNormalEnum.Operator, depth, new TokenOpArray());
+						curs.Peek().AddChild(g);
+						curs.Push(g);
 
 						i++;
 						squdep.Push(depth++);
-						goto begin;
+						if(depth > maxdep) maxdep = depth;
+					}
+					goto begin;
 
 					case TokenInfoEnum.CloseSqu:
 						if(squdep.Count > 0 && squdep.Peek() == --depth) {
 							squdep.Pop();
-							GroupExpand(igp, ref groups);
-							groups[igp++] = new TokenGroup(TokenGroupEnum.ArrayEnd, depth, null);
+							curs.Pop();
 
 						} else Program.Error(data.FileName, line, "Unexpected closing square bracket!");
 						i++;
@@ -469,13 +474,11 @@ namespace MDASM2 {
 						goto type_text;
 
 					case TokenInfoEnum.String:
-						GroupExpand(igp, ref groups);
-						groups[igp++] = new TokenGroup(TokenGroupEnum.String, depth, CutStr(ref buf, infos[i++]));
+						curs.Peek().AddChild(new TokenGroup(TokenNormalEnum.String, depth, new TokenValue(TokenValueType.String, CutStr(ref buf, infos[i++]))));
 						goto begin;
 
 					case TokenInfoEnum.Number:
-						GroupExpand(igp, ref groups);
-						groups[igp++] = new TokenGroup(TokenGroupEnum.Number, depth, Program.StringToNum(CutStr(ref buf, infos[i++])));
+						curs.Peek().AddChild(new TokenGroup(TokenNormalEnum.Number, depth, Program.StringToNum(CutStr(ref buf, infos[i++]))));
 						goto begin;
 
 					case TokenInfoEnum.MathOperator: {
@@ -563,8 +566,7 @@ namespace MDASM2 {
 							break;
 						}
 
-						GroupExpand(igp, ref groups);
-						groups[igp++] = new TokenGroup(TokenGroupEnum.MathOperator, depth, op);
+						curs.Peek().AddChild(new TokenGroup(TokenNormalEnum.Operator, depth, op));
 						i++;
 					}
 					break;
@@ -587,13 +589,14 @@ namespace MDASM2 {
 					if (infos[i].Type == TokenInfoEnum.OpenParen) {
 						// this is a macro
 						macrodep.Push(depth++);
+						if(depth > maxdep) maxdep = depth;
 						goto put_macro;
 
 
 					} else if (infos[i].Type == TokenInfoEnum.Separator) {
 						// try to see if we can make this to be a macro call
 						if (i++ == 0 || i >= ifp) goto put_label;
-						if (i - 2 != labelpos) goto put_label;
+					//	if (i - 2 != labelpos) goto put_label;
 
 						// this is a macro
 						macrodep.Push(-1);
@@ -615,18 +618,28 @@ namespace MDASM2 {
 					}
 
 				put_label: // we found some type of text...
-					GroupExpand(igp + (dot == null ? 0 : 1), ref groups);
-					groups[igp++] = new TokenGroup(TokenGroupEnum.Text, depth, label);
+					if(dot != null) {
+						// special dot handling
+						TokenOpField f = new TokenOpField {
+							Left = new TokenValue(TokenValueType.Text, label),
+							Right = new TokenValue(TokenValueType.Text, dot)
+						};
 
-					if(dot != null) groups[igp++] = new TokenGroup(TokenGroupEnum.Local, depth, dot);
+						curs.Peek().AddChild(new TokenGroup(TokenNormalEnum.Operator, depth, f));
+
+					} else curs.Peek().AddChild(new TokenGroup(TokenNormalEnum.Text, depth, new TokenValue(TokenValueType.Text, label)));
 					goto begin;
 
-				put_macro:  // this is a macro call
-					GroupExpand(igp + (dot == null ? 0 : 1), ref groups);
-					groups[igp++] = new TokenGroup(TokenGroupEnum.MacroName, depth, label);
+				put_macro: { // this is a macro call
+						TokenMacroCall c = new TokenMacroCall(label);
+						TokenGroup g = new TokenGroup(TokenNormalEnum.MacroCall, depth, c);
+						curs.Peek().AddChild(g);
 
-					if (dot != null) groups[igp++] = new TokenGroup(TokenGroupEnum.MacroSize, depth, dot);
-					goto begin;
+						if(dot != null) c.Size = dot;
+						depth++;
+						curs.Push(g);
+						goto begin;
+					}
 				}
 
 				done:;
@@ -634,24 +647,237 @@ namespace MDASM2 {
 
 			/****************************************
 			// --------------- step 3 ---------------
-			// combine into recursive interest groups
+			// combine groups into valid token
 			*****************************************/
 
 			{
+				Stack<TokenGroup> curs = new Stack<TokenGroup>();
+				curs.Push(parent);
+
+				// search for the deepest child structure
+				recurse:
+				for(int i = 0;i < curs.Peek().Children.Count; i++) {
+					if(curs.Peek().Children[i].Children.Count > 0) {
+						curs.Push(curs.Peek().Children[i]);
+						goto recurse;
+					}
+				}
+
+			rerun:
+				List<TokenGroup> ignore = new List<TokenGroup>();
+
+				recheck:
+				if(curs.Peek().Children.Count == 0) {
+					curs.Pop();
+					goto recurse;
+
+				} else if(curs.Peek().Children.Count == 1) {
+					// handle merging with parent element
+					TokenGroup child = curs.Peek().Children[0];
+
+					switch(curs.Peek().Type) {
+						case TokenNormalEnum.None:
+							TokenGroup pa = curs.Pop();
+							if(curs.Count > 0)
+								curs.Peek().Children[curs.Peek().Children.IndexOf(pa)] = child;
+
+							else return new Token[] { pa.Variable as Token };	// return this as the statement
+							break;
+
+						case TokenNormalEnum.MacroCall:
+							if(!child.IsValueOrOperator())
+								Program.Error(data.FileName, line, "Invalid macro argument encountered!");
+
+							(curs.Peek().Variable as TokenMacroCall).Arguments.Add(child.Variable);
+							curs.Pop().Children.Remove(child);
+							break;
+
+						case TokenNormalEnum.Operator: {
+							if(curs.Peek().Variable is TokenOpArray a) {
+								a.Right = child.Variable as TokenValue;
+								curs.Pop().Children.Remove(child);
+
+							} else goto case default;
+						} 
+							break;
+
+						default:
+							Program.Error(data.FileName, line, "Invalid sequence encountered. Unable to continue.");
+							break;
+					}
+
+					goto recurse;
+				}
+
+				// we need to intelligently combine each inner group
+				int pric = -1, maxprec = int.MinValue;
+				TokenGroup prec = null;
+
+				// normal case with more than 1 children
+				for(int i = 0;i < curs.Peek().Children.Count; i++) {
+					int p = curs.Peek().Children[i].GetPrecedence();
+
+					if(p > maxprec && !ignore.Contains(curs.Peek().Children[i]) && (curs.Peek().Children[i].Variable as TokenOperator)?.IsFull() != true) {
+						maxprec = p;
+						pric = i;
+						prec = curs.Peek().Children[i];
+					}
+				}
+
+				TokenGroup left = null, right = null;
+
+				// check if this has inner children, and if so, process them correctly
+				if(prec != null) {
+					if(maxprec >= 0) {
+						// ok, now we figure out what to do with this child
+						if(pric > 0) left = curs.Peek().Children[pric - 1];
+						if(pric + 1 < curs.Peek().Children.Count) right = curs.Peek().Children[pric + 1];
+
+						// precaution
+						if(left == null && right == null) {
+							curs.Pop();
+							goto recurse;
+						}
+
+						switch(prec.Type) {
+							case TokenNormalEnum.Label:
+								if(prec.Variable != null)
+									goto nextone;
+
+								if(left == null)
+									Program.Error(data.FileName, line, "Invalid label!");
+
+								prec.Variable = new TokenLabelCreate(left.Variable);
+								curs.Peek().Children.Remove(left);
+								break;
+
+							case TokenNormalEnum.Operator: {
+								bool change = false;
+
+								// this is a math operator, do spechul stuff
+								if(left == null || left.GetPrecedence() < 0) {
+									// this ought to be unary operator...
+
+									if(right == null || right.GetPrecedence() < 0)
+										Program.Error(data.FileName, line, "Invalid left and right value!");
+
+									if((prec.Variable as TokenOperator)?.IsUnary != true && (prec.Variable as TokenOperatorBinary)?.Left == null) {
+										// its not! However, this may be a special case
+										if(prec.Variable is TokenOpAdd) {
+											curs.Peek().Children.Remove(prec);
+											goto rerun;
+
+										} else if(prec.Variable is TokenOpSub) prec.Variable = new TokenOpNeg();
+										else Program.Error(data.FileName, line, "Unexpected binary operator " + (prec.Variable as TokenOperator)?.OpStr + " without a left value!");
+									}
+
+									// check if left is a valid value that we could assign
+									if(right.IsValueOrOperator()) {
+										if((prec.Variable as TokenOperator)?.Right != null) {
+											if(right.Variable is TokenOperatorBinary r && r.Left == null) {
+												r.Left = prec.Variable as TokenValue;
+												curs.Peek().Children.Remove(prec);
+												change = true;
+
+											} else Program.Error(data.FileName, line, "Operators right side already has a value!");
+
+										} else {
+											(prec.Variable as TokenOperator).Right = right.Variable as TokenValue;
+											curs.Peek().Children.Remove(right);
+											change = true;
+
+											if(right.Variable is TokenOperator o) {
+												// check that there will be no orphan branches
+												if(!o.IsUnary && (o as TokenOperatorBinary).Left == null)
+													Program.Error(data.FileName, line, "Unexpected binary operator " + o.OpStr + " without a left value!");
+											}
+										}
+									}
+
+								} else {
+									// this ought to be binary operator...
+
+									// first, try to merge left value
+									if(left.IsValueOrOperator()) {
+										if((prec.Variable as TokenOperatorBinary)?.Left != null) {
+											if(left.Variable is TokenOperator l && l.Right == null) {
+												l.Right = prec.Variable as TokenValue;
+												curs.Peek().Children.Remove(prec);
+												change = true;
+
+											} else Program.Error(data.FileName, line, "Operators left side already has a value!");
+
+										} else {
+											(prec.Variable as TokenOperatorBinary).Left = left.Variable as TokenValue;
+											curs.Peek().Children.Remove(left);
+											change = true;
+
+											if(left.Variable is TokenOperator o) {
+												// check that there will be no orphan branches
+												if(!o.IsUnary && (o as TokenOperatorBinary).Right == null)
+													Program.Error(data.FileName, line, "Unexpected binary operator " + o.OpStr + " without a right value!");
+											}
+										}
+									}
+
+									// special case for array operators
+									if(!(prec.Variable is TokenOpArray) && right != null && right.GetPrecedence() >= 0) {
+										// add only if valid
+										if(right.IsValueOrOperator()) {
+											if((prec.Variable as TokenOperatorBinary)?.Right != null) {
+												if(right.Variable is TokenOperatorBinary r && r.Left == null) {
+													r.Left = prec.Variable as TokenValue;
+													curs.Peek().Children.Remove(prec);
+													change = true;
+
+												} else Program.Error(data.FileName, line, "Operators right side already has a value!");
+
+											} else {
+												(prec.Variable as TokenOperator).Right = right.Variable as TokenValue;
+												curs.Peek().Children.Remove(right);
+												change = true;
+
+												if(right.Variable is TokenOperator ox) {
+													// check that there will be no orphan branches
+													if(!ox.IsUnary && (ox as TokenOperatorBinary).Left == null)
+														Program.Error(data.FileName, line, "Unexpected binary operator " + ox.OpStr + " without a right value!");
+												}
+											}
+										}
+									}
+								}
+
+								if(!change) goto nextone;
+								goto rerun;
+							}
+
+							default:
+								Program.Error(data.FileName, line, "Unexpected state!");
+								break;
+						}
+						goto rerun;
+
+					nextone:
+						ignore.Add(prec);
+						goto recheck;
+
+					} else {
+
+					}
+
+				} else {
+					// precaution
+					curs.Pop();
+					goto recurse;
+				}
 			}
+
+			return null;
 		}
 
 		// cut part of the buffer into a string according to token
 		private static string CutStr(ref char[] buf, TokenInfo t) {
 			return new string(buf, t.Start, t.End - t.Start + 1);
-		}
-
-		private static void GroupExpand(int expand, ref TokenGroup[] groups) {
-			if(expand >= groups.Length) {
-				var _g = groups;
-				groups = new TokenGroup[_g.Length << 1];
-				Array.Copy(_g, groups, _g.Length);
-			}
 		}
 
 		// quick method to double the infos array size
@@ -663,6 +889,7 @@ namespace MDASM2 {
 		#endregion
 	}
 
+	#region Tokenize Classes
 	public enum TokenInfoEnum {
 		None, Separator, String, Text, Number,
 		OpenParen, CloseParen, OpenSqu, CloseSqu, BlockStart, BlockEnd,
@@ -681,24 +908,56 @@ namespace MDASM2 {
 		}
 	}
 
-	public struct TokenGroup {
-		public TokenGroupEnum Type;
+	public class TokenGroup {
+		public TokenNormalEnum Type;
 		public dynamic Variable;
 		public int Depth;
+		public List<TokenGroup> Children;
 
-		public TokenGroup(TokenGroupEnum type, int depth, dynamic variable) {
+		public TokenGroup(TokenNormalEnum type, int depth, dynamic variable) {
 			Type = type;
 			Depth = depth;
 			Variable = variable;
+
+			Children = new List<TokenGroup>();
 		}
+
+		public void AddChild(params TokenGroup[] tokens) {
+			Children.AddRange(tokens);
+		}
+
+		public int GetPrecedence() {
+			return Type switch
+			{
+				TokenNormalEnum.Operator => (Variable as TokenOperator).Precedence,
+				TokenNormalEnum.Number => 0,
+				TokenNormalEnum.String => 0,
+				TokenNormalEnum.Text => 0,
+				TokenNormalEnum.Label => 0,
+				TokenNormalEnum.MacroCall => 1,
+				TokenNormalEnum.MacroArgument => -1,
+				TokenNormalEnum.BlockStart => -10,
+				TokenNormalEnum.BlockEnd => -10,
+				TokenNormalEnum.None => -1,
+				_ => -1,
+			};
+		}
+
+		public bool IsValueOrOperator() => 
+			Type == TokenNormalEnum.Operator || 
+			Type == TokenNormalEnum.Text || 
+			Type == TokenNormalEnum.String || 
+			Type == TokenNormalEnum.Number || 
+			Type == TokenNormalEnum.MacroCall ||
+			(Type == TokenNormalEnum.Label && Variable != null);
 	}
 
-	public enum TokenGroupEnum {
-		None, String, Text, Number, Local, Label, Cast,
-		Expression, MathOperator,
-		MacroName, MacroSize, MacroArgument, MacroEnd,
-		ArrayStart, ArrayEnd, BlockStart, BlockEnd,
+	public enum TokenNormalEnum {
+		None, Operator, String, Text, Number, Label,
+		MacroCall, MacroArgument,
+		BlockStart, BlockEnd,
 	}
+	#endregion
 
 	public class FileData {
 		public List<Token> Tokens;
