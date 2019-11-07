@@ -87,8 +87,69 @@ namespace MDASM2 {
 			return ASCIIEncoding.Default.GetBytes(inputdata);
 		}
 
-		public static dynamic StringToNum(string str) {
-			return new TokenValue(TokenValueType.Float, str);
+		public static dynamic StringToNum(string str, out TokenValueType type) {
+			// detect prefix
+			if(str.StartsWith("0x")) goto hex2;
+			if(str.StartsWith("$")) goto hex1;
+			if(str.StartsWith("0b")) goto bin2;
+
+			// detect suffix
+			if(str.EndsWith("h")) goto hex_1;
+			if(str.EndsWith("b")) goto bin_1;
+
+			// detect float
+			if(str.Contains(".")) {
+				if(!double.TryParse(str, NumberStyles.Float, CultureInfo.InvariantCulture, out double fv))
+					Error("", -1, "Unable to parse " + str + " as a floating point number!");
+
+				type = TokenValueType.Float;
+				return fv;
+			}
+
+			if(!long.TryParse(str, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out long dv))
+				Error("", -1, "Unable to parse " + str + " as a decimal number!");
+
+			type = TokenValueType.Int64;
+			return dv;
+
+		hex1:
+			str = str.Substring(1);
+			goto hexc;
+
+		hex2:
+			str = str.Substring(2);
+			goto hexc;
+
+		hex_1:
+			str = str.Substring(0, str.Length - 1);
+			goto hexc;
+
+		hexc:
+			if(!long.TryParse(str, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out long val))
+				Error("", -1, "Unable to parse "+ str + " as a hex number!");
+
+			type = TokenValueType.Int64;
+			return val;
+
+		bin2:
+			str = str.Substring(2);
+			goto binc;
+
+		bin_1:
+			str = str.Substring(0, str.Length - 1);
+			goto binc;
+
+		binc:
+			try {
+				type = TokenValueType.Int64;
+				return Convert.ToInt64(str, 2);
+
+			} catch(Exception) {
+				Error("", -1, "Unable to parse " + str + " as a binary number!");
+			}
+
+			type = TokenValueType.None;
+			return null;
 		}
 		#endregion
 	}

@@ -333,7 +333,7 @@ namespace MDASM2 {
 							break;
 
 						case '.':
-							if (strchar == 0) {
+							if (strchar == 0 && current != TokenInfoEnum.Number) {
 								if (current != TokenInfoEnum.None) {
 									infos[ifp++] = new TokenInfo(current, start, i - 1);
 									current = TokenInfoEnum.None;
@@ -407,6 +407,14 @@ namespace MDASM2 {
 						i++;
 						goto begin;
 
+					case TokenInfoEnum.Comma:
+						if(macrodep.Count == 0 || depth - 1 != macrodep.Peek())
+							Program.Error(data.FileName, line, "Unexpected comma encountered!");
+
+						curs.Peek().AddChild(new TokenGroup(TokenNormalEnum.MacroArgument, depth, null));
+						i++;
+						goto begin;
+
 					case TokenInfoEnum.LabelOperator: case TokenInfoEnum.LabelOperatorMaybe:
 						curs.Peek().AddChild(new TokenGroup(TokenNormalEnum.Label, depth, null));
 						i++;
@@ -446,8 +454,9 @@ namespace MDASM2 {
 
 						if(macrodep.Count > 0 && macrodep.Peek() == depth) {
 							macrodep.Pop();
-							curs.Pop();
 						}
+
+						curs.Pop();
 						goto begin;
 
 					case TokenInfoEnum.OpenSqu: {
@@ -464,10 +473,10 @@ namespace MDASM2 {
 					case TokenInfoEnum.CloseSqu:
 						if(squdep.Count > 0 && squdep.Peek() == --depth) {
 							squdep.Pop();
-							curs.Pop();
 
 						} else Program.Error(data.FileName, line, "Unexpected closing square bracket!");
 						i++;
+						curs.Pop();
 						goto begin;
 
 					case TokenInfoEnum.Text:
@@ -477,8 +486,10 @@ namespace MDASM2 {
 						curs.Peek().AddChild(new TokenGroup(TokenNormalEnum.String, depth, new TokenValue(TokenValueType.String, CutStr(ref buf, infos[i++]))));
 						goto begin;
 
-					case TokenInfoEnum.Number:
-						curs.Peek().AddChild(new TokenGroup(TokenNormalEnum.Number, depth, Program.StringToNum(CutStr(ref buf, infos[i++]))));
+					case TokenInfoEnum.Number: {
+						dynamic num = Program.StringToNum(CutStr(ref buf, infos[i++]), out TokenValueType type);
+						curs.Peek().AddChild(new TokenGroup(TokenNormalEnum.Number, depth, new TokenValue(type, num)));
+					}
 						goto begin;
 
 					case TokenInfoEnum.MathOperator: {
@@ -495,9 +506,9 @@ namespace MDASM2 {
 									'/' => new TokenOpDivide(),
 									'%' => new TokenOpModulo(),
 
-									'&' => new TokenOpModulo(),
-									'|' => new TokenOpModulo(),
-									'^' => new TokenOpModulo(),
+									'&' => new TokenOpAnd(),
+									'|' => new TokenOpOr(),
+									'^' => new TokenOpXor(),
 
 									'=' => new TokenOpSet(),
 									'!' => new TokenOpLogicalNot(),
@@ -588,8 +599,8 @@ namespace MDASM2 {
 					// check what we should do with the value
 					if (infos[i].Type == TokenInfoEnum.OpenParen) {
 						// this is a macro
-						macrodep.Push(depth++);
-						if(depth > maxdep) maxdep = depth;
+						macrodep.Push(depth);
+						i++;
 						goto put_macro;
 
 
@@ -599,8 +610,7 @@ namespace MDASM2 {
 					//	if (i - 2 != labelpos) goto put_label;
 
 						// this is a macro
-						macrodep.Push(-1);
-						depth++;
+						macrodep.Push(0);
 						goto put_macro;
 
 					} else if (dot == null) {
@@ -637,6 +647,7 @@ namespace MDASM2 {
 
 						if(dot != null) c.Size = dot;
 						depth++;
+						if(depth > maxdep) maxdep = depth;
 						curs.Push(g);
 						goto begin;
 					}
@@ -654,9 +665,9 @@ namespace MDASM2 {
 				Stack<TokenGroup> curs = new Stack<TokenGroup>();
 				curs.Push(parent);
 
-				// search for the deepest child structure
-				recurse:
-				for(int i = 0;i < curs.Peek().Children.Count; i++) {
+			// search for the deepest child structure
+			recurse:
+				for(int i = 0; i < curs.Peek().Children.Count; i++) {
 					if(curs.Peek().Children[i].Children.Count > 0) {
 						curs.Push(curs.Peek().Children[i]);
 						goto recurse;
@@ -666,7 +677,7 @@ namespace MDASM2 {
 			rerun:
 				List<TokenGroup> ignore = new List<TokenGroup>();
 
-				recheck:
+			recheck:
 				if(curs.Peek().Children.Count == 0) {
 					curs.Pop();
 					goto recurse;
@@ -681,7 +692,7 @@ namespace MDASM2 {
 							if(curs.Count > 0)
 								curs.Peek().Children[curs.Peek().Children.IndexOf(pa)] = child;
 
-							else return new Token[] { pa.Variable as Token };	// return this as the statement
+							else return new Token[] { child.Variable as Token };    // return this as the statement
 							break;
 
 						case TokenNormalEnum.MacroCall:
@@ -698,8 +709,8 @@ namespace MDASM2 {
 								curs.Pop().Children.Remove(child);
 
 							} else goto case default;
-						} 
-							break;
+						}
+						break;
 
 						default:
 							Program.Error(data.FileName, line, "Invalid sequence encountered. Unable to continue.");
@@ -714,7 +725,7 @@ namespace MDASM2 {
 				TokenGroup prec = null;
 
 				// normal case with more than 1 children
-				for(int i = 0;i < curs.Peek().Children.Count; i++) {
+				for(int i = 0; i < curs.Peek().Children.Count; i++) {
 					int p = curs.Peek().Children[i].GetPrecedence();
 
 					if(p > maxprec && !ignore.Contains(curs.Peek().Children[i]) && (curs.Peek().Children[i].Variable as TokenOperator)?.IsFull() != true) {
@@ -851,6 +862,13 @@ namespace MDASM2 {
 								goto rerun;
 							}
 
+							case TokenNormalEnum.Number:
+							case TokenNormalEnum.String:
+							case TokenNormalEnum.MacroArgument:
+							case TokenNormalEnum.MacroCall:
+							case TokenNormalEnum.Text:
+								goto nextone;
+
 							default:
 								Program.Error(data.FileName, line, "Unexpected state!");
 								break;
@@ -861,13 +879,55 @@ namespace MDASM2 {
 						ignore.Add(prec);
 						goto recheck;
 
-					} else {
+					}
+				}
+			multi:
+				// multiple tokens, see what to do about it
+				if(curs.Count == 1) {
+					// if there is only 1 parent, return all tokens
+					Token[] ret = new Token[curs.Peek().Children.Count];
 
+					for(int i = 0; i < ret.Length; i++)
+						ret[i] = curs.Peek().Children[i].Variable as Token;
+
+					return ret;
+				}
+
+				if(curs.Peek().Type == TokenNormalEnum.MacroCall) {
+					// parent is a macro call, fold the elements into it
+					bool trailingcomma = false;
+
+					for(int o = 0; o < curs.Peek().Children.Count;) {
+						// check for empty argument
+						if(curs.Peek().Children[o].Type == TokenNormalEnum.MacroArgument) {
+							(curs.Peek().Variable as TokenMacroCall).Arguments.Add(new TokenValue(TokenValueType.None, null));
+							o++;
+							trailingcomma = true;
+							continue;
+						}
+
+						// not empty argument, expect a token followed with comma or end of list
+						TokenValue a = curs.Peek().Children[o++].Variable as TokenValue;
+						if(a == null)
+							Program.Error(data.FileName, line, "Macro argument is invalid!");
+
+						if(o < curs.Peek().Children.Count) {
+							trailingcomma = true;
+							if(curs.Peek().Children[o++].Type != TokenNormalEnum.MacroArgument)
+								Program.Error(data.FileName, line, "Expected comma, but got something else instead...");
+
+						} else trailingcomma = false;
+
+						// is in valid format
+						(curs.Peek().Variable as TokenMacroCall).Arguments.Add(a);
 					}
 
-				} else {
-					// precaution
-					curs.Pop();
+					// if there was a trailing comma, we need to add empty argument at the end.
+					if(trailingcomma)
+						(curs.Peek().Variable as TokenMacroCall).Arguments.Add(new TokenValue(TokenValueType.None, null));
+
+					// do cleanup
+					curs.Pop().Children = new List<TokenGroup>();
 					goto recurse;
 				}
 			}
